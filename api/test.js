@@ -1,13 +1,17 @@
-import { redis } from "../lib/kv";
+import { redis } from "../lib/kv.js";
 
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  try {
+    res.setHeader("Access-Control-Allow-Origin", "*");
 
-  // Проверяем KV
-  const pong = await redis.ping();
+    const pong = await redis.ping();
 
-  res.status(200).json({
-    ok: true,
-    kv: pong,
-  });
+    res.status(200).json({
+      ok: true,
+      kv: pong,
+    });
+  } catch (err) {
+    console.error("KV error:", err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
 }
