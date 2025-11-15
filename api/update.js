@@ -1,5 +1,14 @@
 import { redis } from "../lib/kv.js";
 
+const SECRET = process.env.UPDATE_SECRET;
+
+export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
+  if (req.query.secret !== SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
 const API_KEY = process.env.SOCIALDATA_API_KEY;
 const COMMUNITY_ID = "1951903018464772103";
 
