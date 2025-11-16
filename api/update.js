@@ -1,14 +1,6 @@
 import { redis } from "../lib/kv.js";
 
 const SECRET = process.env.UPDATE_SECRET;
-
-export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-
-  if (req.query.secret !== SECRET) {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-
 const API_KEY = process.env.SOCIALDATA_API_KEY;
 const COMMUNITY_ID = "1951903018464772103";
 
@@ -17,17 +9,34 @@ const BASE_URL = `https://api.socialdata.tools/twitter/community/${COMMUNITY_ID}
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
 
+  // --- SECRET CHECK ---
+  const url = new URL(req.url, `https://${req.headers.host}`);
+  const secretParam = url.searchParams.get("secret");
+
+  if (secretParam !== SECRET) {
+    return res.status(403).json({ error: "Forbidden: invalid secret" });
+  }
+
+  // --- API KEY CHECK ---
   if (!API_KEY) {
     return res.status(500).json({ error: "SOCIALDATA_API_KEY missing" });
   }
 
   try {
+    console.log("UPDATE STARTED");
+
     const allTweets = await collectAllTweets();
     const leaderboard = buildLeaderboard(allTweets);
 
-    // save to KV
     await redis.set("all_tweets", allTweets);
     await redis.set("leaderboard", leaderboard);
+
+    // Save status info
+    await redis.set("status", {
+      updated_at: Date.now(),
+      tweets: allTweets.length,
+      users: leaderboard.length
+    });
 
     return res.status(200).json({
       ok: true,
@@ -45,16 +54,16 @@ export default async function handler(req, res) {
    FUNCTIONS
 ----------------------------- */
 
-async function fetchTweets(cursor = null, limit = 50) {
+async function fetchTweets(cursor = null) {
   const params = new URLSearchParams({
     type: "Latest",
-    limit: String(limit),
+    limit: "50",
   });
 
   if (cursor) params.append("cursor", cursor);
 
   const r = await fetch(`${BASE_URL}?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${API_KEY}` }
+    headers: { Authorization: `Bearer ${API_KEY}` },
   });
 
   if (!r.ok) {
@@ -72,18 +81,19 @@ async function collectAllTweets() {
   let total = 0;
 
   while (true) {
+    console.log("Fetching cursor:", cursor);
+
     const data = await fetchTweets(cursor);
     const tweets = data.tweets || [];
+
     cursor = data.next_cursor;
 
     if (!tweets.length) break;
 
-    const newTweets = tweets.filter(t => !seenIds.has(t.id_str));
-
+    const newTweets = tweets.filter((t) => !seenIds.has(t.id_str));
     if (!newTweets.length) break;
 
     allTweets.push(...newTweets);
-
     for (const t of newTweets) seenIds.add(t.id_str);
 
     total += newTweets.length;
@@ -92,7 +102,7 @@ async function collectAllTweets() {
 
     if (!cursor) break;
 
-    await sleep(3000); // rate limit sleep
+    await sleep(3000);
   }
 
   return allTweets;
@@ -114,7 +124,7 @@ function buildLeaderboard(tweets) {
       retweets: 0,
       comments: 0,
       quotes: 0,
-      views: 0
+      views: 0,
     };
 
     stats.posts += 1;
@@ -127,9 +137,9 @@ function buildLeaderboard(tweets) {
     leaderboard[name] = stats;
   }
 
-  return Object.entries(leaderboard); 
+  return Object.entries(leaderboard);
 }
 
 function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }
